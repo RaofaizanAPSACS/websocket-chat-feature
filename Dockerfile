@@ -22,6 +22,9 @@ COPY src src
 # Build the application
 RUN ./mvnw clean package -DskipTests
 
+# Install curl for health check (before switching to non-root user)
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for security
 RUN addgroup --system spring && adduser --system spring --ingroup spring
 
@@ -35,9 +38,6 @@ EXPOSE 8080
 # Set environment variables
 ENV JAVA_OPTS="-Xmx512m -Xms256m"
 ENV SPRING_PROFILES_ACTIVE=production
-
-# Install curl for health check
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
