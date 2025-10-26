@@ -16,6 +16,11 @@ public class UserController {
 
     @Autowired
     private UserRepository userRepository;
+    
+    @GetMapping("/health")
+    public ResponseEntity<String> health() {
+        return ResponseEntity.ok("Server is running!");
+    }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {

@@ -300,7 +300,17 @@ cd whatsapp-chat-clone
 ./mvnw spring-boot:run
 ```
 
-**Option B: Using Maven (if installed)**
+**Option B: Using Docker**
+```bash
+# Build and run with Docker
+docker build -t whatsapp-chat-clone .
+docker run -p 8080:8080 whatsapp-chat-clone
+
+# Or using docker-compose
+docker-compose up --build
+```
+
+**Option C: Using Maven (if installed)**
 ```bash
 mvn spring-boot:run
 ```
@@ -308,6 +318,22 @@ mvn spring-boot:run
 ### 3. Access the Application
 - Open your browser and go to: `http://localhost:8080`
 - The application will start on port 8080
+
+## ☁️ Deploy to Render
+
+### Quick Deploy
+1. **Fork this repository** to your GitHub account
+2. **Connect to Render** at [render.com](https://render.com)
+3. **Create new Web Service** from your repository
+4. **Use the included `render.yaml`** for automatic configuration
+5. **Deploy** and access your live chat application!
+
+### Detailed Deployment Guide
+See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive deployment instructions including:
+- Docker containerization
+- Render deployment steps
+- Environment configuration
+- Monitoring and troubleshooting
 
 ## 🎯 How to Use
 
