@@ -227,47 +227,117 @@
             stompClient = Stomp.over(socket);
             stompClient.connect({}, function (frame) {
                 console.log('Connected: ' + frame);
+                console.log('WebSocket connection established for user:', currentUsername);
                 
-                // Subscribe to chat messages - filter by receiver
-                stompClient.subscribe('/topic/chat', function (message) {
-                    const chatMessage = JSON.parse(message.body);
-                    
-                    // Only process messages where current user is the receiver
-                    if (chatMessage.receiver === currentUsername) {
-                        // Auto-switch to sender's conversation if not already there
-                        if (selectedUser !== chatMessage.sender) {
-                            selectedUser = chatMessage.sender;
-                            
-                            // Update UI
-                            document.getElementById('chatHeader').innerHTML = `<h3>Chat with ${chatMessage.sender}</h3>`;
-                            document.getElementById('messageInputContainer').style.display = 'flex';
-                            
-                            // Update sidebar
-                            document.querySelectorAll('.user-item').forEach(item => {
-                                item.classList.remove('selected');
-                                if (item.textContent === chatMessage.sender) {
-                                    item.classList.add('selected');
-                                }
-                            });
-                            
-                            // Load conversation history
-                            document.getElementById('messages').innerHTML = '';
-                            loadConversationHistory(chatMessage.sender);
-                        }
+                // Subscribe to private messages (server-side routed)
+                // We'll get the session ID after the user joins
+                let sessionId = 'unknown';
+                let messageSubscription = null;
+                let statusSubscription = null;
+                
+                // Function to subscribe to session-specific topics
+                function subscribeToSessionTopics() {
+                    if (sessionId !== 'unknown') {
+                        const sessionMessageTopic = '/topic/session/' + sessionId + '/queue/messages';
+                        const sessionStatusTopic = '/topic/session/' + sessionId + '/status';
                         
-                        // Display the message
-                        setTimeout(() => {
-                            displayMessage(chatMessage);
-                        }, 100);
+                        console.log('Subscribing to session topics:');
+                        console.log('- Message topic:', sessionMessageTopic);
+                        console.log('- Status topic:', sessionStatusTopic);
+                        
+                        // Subscribe to messages
+                        messageSubscription = stompClient.subscribe(sessionMessageTopic, function (message) {
+                            console.log('Raw message received:', message);
+                            console.log('Message destination:', message.headers.destination);
+                            const chatMessage = JSON.parse(message.body);
+                            console.log('Received private message:', chatMessage);
+                            console.log('Current selected user:', selectedUser);
+                            console.log('Current username:', currentUsername);
+                            
+                            // Auto-switch to sender's conversation if not already there
+                            if (selectedUser !== chatMessage.sender) {
+                                selectedUser = chatMessage.sender;
+                                
+                                // Update UI
+                                document.getElementById('chatHeader').innerHTML = `<h3>Chat with ${chatMessage.sender}</h3>`;
+                                document.getElementById('messageInputContainer').style.display = 'flex';
+                                
+                                // Update sidebar
+                                document.querySelectorAll('.user-item').forEach(item => {
+                                    item.classList.remove('selected');
+                                    if (item.textContent === chatMessage.sender) {
+                                        item.classList.add('selected');
+                                    }
+                                });
+                                
+                                // Load conversation history first, then display the new message
+                                document.getElementById('messages').innerHTML = '';
+                                loadConversationHistory(chatMessage.sender).then(() => {
+                                    // Display the new message after history is loaded
+                                    displayMessage(chatMessage);
+                                }).catch(error => {
+                                    console.error('Error loading conversation history:', error);
+                                    // Still display the message even if history loading fails
+                                    displayMessage(chatMessage);
+                                });
+                            } else {
+                                // If already in the correct conversation, just display the message
+                                displayMessage(chatMessage);
+                            }
+                        });
+                        
+                        // Subscribe to status
+                        statusSubscription = stompClient.subscribe(sessionStatusTopic, function (message) {
+                            console.log('Status message received:', message);
+                            const statusMessage = JSON.parse(message.body);
+                            console.log('Delivery status:', statusMessage);
+                        });
                     }
-                });
+                }
 
                 // Subscribe to public messages (for user join/leave)
                 stompClient.subscribe('/topic/public', function (message) {
+                    console.log('Public message received:', message);
                     const chatMessage = JSON.parse(message.body);
+                    
                     if (chatMessage.type === 'JOIN' || chatMessage.type === 'LEAVE') {
                         loadOnlineUsers();
                     }
+                });
+                
+                // Get session ID after user joins
+                setTimeout(() => {
+                    fetch(`/api/users/session/${currentUsername}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.sessionId) {
+                                sessionId = data.sessionId;
+                                console.log('Retrieved session ID:', sessionId);
+                                subscribeToSessionTopics();
+                            } else {
+                                console.log('User not online yet, retrying...');
+                                // Retry after a short delay
+                                setTimeout(() => {
+                                    fetch(`/api/users/session/${currentUsername}`)
+                                        .then(response => response.json())
+                                        .then(data => {
+                                            if (data.sessionId) {
+                                                sessionId = data.sessionId;
+                                                console.log('Retrieved session ID on retry:', sessionId);
+                                                subscribeToSessionTopics();
+                                            }
+                                        });
+                                }, 1000);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error getting session ID:', error);
+                        });
+                }, 500); // Wait 500ms for the user to be registered
+                
+                // Test subscription to verify WebSocket is working
+                stompClient.subscribe('/topic/test', function (message) {
+                    console.log('Test message received:', message);
                 });
 
                 // Subscribe to typing indicators
@@ -306,6 +376,7 @@
         }
 
         function displayMessage(message) {
+            console.log('Displaying message:', message);
             const messagesDiv = document.getElementById('messages');
             const messageDiv = document.createElement('div');
             messageDiv.className = message.sender === currentUsername ? 'message sent' : 'message received';
@@ -374,22 +445,38 @@
         }
 
         function loadConversationHistory(username) {
-            fetch(`/api/messages/conversation/${currentUsername}/${username}`)
-                .then(response => response.json())
-                .then(messages => {
-                    messages.forEach(message => {
-                        // Convert database message to chat message format
-                        const chatMessage = {
-                            content: message.content,
-                            sender: message.sender.username,
-                            receiver: message.receiver.username,
-                            timestamp: message.sentAt,
-                            type: 'CHAT'
-                        };
-                        displayMessage(chatMessage);
-                    });
+            // Validate username before making the API call
+            if (!username || username === 'null' || username === 'undefined') {
+                console.warn('Invalid username for conversation history:', username);
+                return Promise.resolve();
+            }
+            
+            return fetch(`/api/messages/conversation/${currentUsername}/${username}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
                 })
-                .catch(error => console.error('Error loading conversation:', error));
+                .then(messages => {
+                    if (Array.isArray(messages)) {
+                        messages.forEach(message => {
+                            // Convert database message to chat message format
+                            const chatMessage = {
+                                content: message.content,
+                                sender: message.sender.username,
+                                receiver: message.receiver.username,
+                                timestamp: message.sentAt,
+                                type: 'CHAT'
+                            };
+                            displayMessage(chatMessage);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading conversation:', error);
+                    return Promise.resolve(); // Return resolved promise even on error
+                });
         }
 
         // Handle Enter key in message input
@@ -398,6 +485,16 @@
                 sendMessage();
             }
         });
+        
+        // Test WebSocket function
+        function testWebSocket() {
+            if (stompClient) {
+                console.log('Sending test message...');
+                stompClient.send("/app/chat.test", {}, JSON.stringify({}));
+            } else {
+                console.log('STOMP client not connected');
+            }
+        }
 
 
         // Handle page unload

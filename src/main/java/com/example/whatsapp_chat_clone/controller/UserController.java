@@ -1,12 +1,15 @@
 package com.example.whatsapp_chat_clone.controller;
 
+import com.example.whatsapp_chat_clone.config.WebSocketSessionManager;
 import com.example.whatsapp_chat_clone.model.User;
 import com.example.whatsapp_chat_clone.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -17,9 +20,25 @@ public class UserController {
     @Autowired
     private UserRepository userRepository;
     
+    @Autowired
+    private WebSocketSessionManager sessionManager;
+    
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         return ResponseEntity.ok("Server is running!");
+    }
+    
+    @GetMapping("/session/{username}")
+    public ResponseEntity<Map<String, String>> getSessionId(@PathVariable String username) {
+        String sessionId = sessionManager.getSessionIdByUsername(username);
+        Map<String, String> response = new HashMap<>();
+        if (sessionId != null) {
+            response.put("sessionId", sessionId);
+            response.put("status", "online");
+        } else {
+            response.put("status", "offline");
+        }
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/login")

@@ -14,282 +14,20 @@ A real-time chat application built with Spring Boot and WebSockets, featuring on
 
 ## 🛠️ Tech Stack
 
-- **Backend**: Spring Boot 3.x
+- **Backend**: Spring Boot 3.x, Java 21
 - **Database**: H2 (in-memory)
 - **WebSocket**: STOMP over SockJS
-- **Message Broker**: Spring's Simple Message Broker
 - **Frontend**: HTML, CSS, JavaScript
 - **Build Tool**: Maven
-
-## 🌐 WebSocket Communication Protocol
-
-### What are WebSockets?
-WebSockets provide **full-duplex communication** between client and server over a single TCP connection. Unlike HTTP's request-response model, WebSockets enable:
-- **Real-time bidirectional communication**
-- **Low latency** message delivery
-- **Persistent connections** that stay open
-- **Efficient data transfer** with minimal overhead
-
-### WebSocket vs HTTP
-| Feature | HTTP | WebSocket |
-|---------|------|-----------|
-| **Connection** | Request-Response | Persistent |
-| **Latency** | High (new connection each time) | Low (reuse connection) |
-| **Real-time** | No (polling required) | Yes (push messages) |
-| **Overhead** | High (headers each request) | Low (minimal framing) |
-| **Use Case** | Traditional web apps | Real-time applications |
-
-### STOMP Protocol
-**STOMP (Simple Text Oriented Messaging Protocol)** is a messaging protocol that works on top of WebSockets:
-- **Text-based protocol** (human-readable)
-- **Frame-based messaging** with headers and body
-- **Destination-based routing** (topics/queues)
-- **Message acknowledgment** and error handling
-- **Subscription management**
-
-### SockJS Fallback
-**SockJS** provides WebSocket-like functionality with fallbacks:
-- **Primary**: Native WebSocket connection
-- **Fallbacks**: HTTP streaming, long polling, iframe
-- **Browser compatibility** across all browsers
-- **Automatic fallback** when WebSocket is blocked
-
-## 📡 Message Broker Architecture
-
-### Spring's Simple Message Broker
-This application uses Spring's **in-memory message broker**:
-
-```
-┌─────────────────┐    WebSocket    ┌──────────────────┐
-│   Frontend      │◄──────────────►│   Spring Boot    │
-│   (Browser)     │   STOMP/SockJS  │   Application    │
-└─────────────────┘                 └──────────────────┘
-                                             │
-                                             ▼
-                                    ┌──────────────────┐
-                                    │ Message Broker   │
-                                    │ (In-Memory)      │
-                                    └──────────────────┘
-                                             │
-                                             ▼
-                                    ┌──────────────────┐
-                                    │ Topic/Queue      │
-                                    │ Routing          │
-                                    └──────────────────┘
-```
-
-### Message Flow
-1. **Client connects** via WebSocket to `/ws`
-2. **STOMP handshake** establishes protocol
-3. **Client subscribes** to topics/queues
-4. **Messages sent** to `/app/*` endpoints
-5. **Server processes** and routes messages
-6. **Broker delivers** to subscribed clients
-
-### Topics vs Queues
-- **Topics** (`/topic/*`): **Broadcast** to all subscribers
-- **Queues** (`/queue/*`): **Point-to-point** delivery to specific user
-
-## 🏗️ Spring Boot WebSocket Implementation
-
-### 1. WebSocket Configuration
-```java
-@Configuration
-@EnableWebSocketMessageBroker
-public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
-    
-    @Override
-    public void configureMessageBroker(MessageBrokerRegistry config) {
-        // Enable simple broker for topics and queues
-        config.enableSimpleBroker("/topic", "/queue");
-        // Set application destination prefix
-        config.setApplicationDestinationPrefixes("/app");
-    }
-    
-    @Override
-    public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // Register WebSocket endpoint with SockJS fallback
-        registry.addEndpoint("/ws").withSockJS();
-    }
-}
-```
-
-### 2. Message Controllers
-```java
-@Controller
-public class ChatController {
-    
-    @MessageMapping("/chat.sendMessage")
-    public void sendMessage(@Payload ChatMessage chatMessage) {
-        // Process message and send to broker
-        messagingTemplate.convertAndSend("/topic/chat", chatMessage);
-    }
-}
-```
-
-### 3. Frontend Connection
-```javascript
-// Establish WebSocket connection
-const socket = new SockJS('/ws');
-const stompClient = Stomp.over(socket);
-
-// Connect and subscribe
-stompClient.connect({}, function (frame) {
-    // Subscribe to topic
-    stompClient.subscribe('/topic/chat', function (message) {
-        // Handle incoming message
-    });
-    
-    // Send message
-    stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(message));
-});
-```
-
-## 🔄 Real-time Communication Flow
-
-### 1. User Login Flow
-```
-User → POST /api/users/login → Server
-Server → Update User Status → Database
-Server → Broadcast JOIN → /topic/public
-All Clients → Receive JOIN → Update UI
-```
-
-### 2. Message Sending Flow
-```
-User A → Send Message → /app/chat.sendMessage
-Server → Process Message → Save to Database
-Server → Broadcast Message → /topic/chat
-All Clients → Receive Message → Filter by Receiver
-User B → Display Message → Update Chat UI
-```
-
-### 3. Auto-switch Conversation Flow
-```
-User B → Receives Message → Check Sender
-If Sender ≠ Current Chat → Auto-switch
-Update UI → Load History → Display Message
-```
-
-## 🎯 Key Communication Features
-
-### 1. **Real-time Message Delivery**
-- **Instant delivery** without page refresh
-- **Bidirectional communication** (send/receive)
-- **Connection persistence** for efficiency
-
-### 2. **Message Filtering**
-- **Client-side filtering** by receiver
-- **Auto-switch** to sender's conversation
-- **Topic-based routing** for scalability
-
-### 3. **Connection Management**
-- **Automatic reconnection** on connection loss
-- **Heartbeat mechanism** to detect disconnections
-- **Session management** for user tracking
-
-### 4. **Error Handling**
-- **Graceful fallbacks** with SockJS
-- **Connection error recovery**
-- **Message delivery confirmation**
-
-## 🔧 Spring Boot Specific Features
-
-### 1. **SimpMessagingTemplate**
-```java
-@Autowired
-private SimpMessagingTemplate messagingTemplate;
-
-// Send to specific topic
-messagingTemplate.convertAndSend("/topic/chat", message);
-
-// Send to specific user
-messagingTemplate.convertAndSendToUser(username, "/queue/messages", message);
-```
-
-### 2. **Message Mapping Annotations**
-```java
-@MessageMapping("/chat.sendMessage")  // Maps to /app/chat.sendMessage
-@MessageMapping("/chat.addUser")      // Maps to /app/chat.addUser
-@MessageMapping("/chat.leave")        // Maps to /app/chat.leave
-```
-
-### 3. **Session Management**
-```java
-@MessageMapping("/chat.addUser")
-public ChatMessage addUser(@Payload ChatMessage chatMessage, 
-                          SimpMessageHeaderAccessor headerAccessor) {
-    // Access session attributes
-    headerAccessor.getSessionAttributes().put("username", chatMessage.getSender());
-    return chatMessage;
-}
-```
-
-### 4. **CORS Configuration**
-```java
-@Configuration
-public class CorsConfig {
-    @Bean
-    public CorsFilter corsFilter() {
-        // Allow WebSocket connections from frontend
-        CorsConfiguration config = new CorsConfiguration();
-        config.addAllowedOrigin("*");
-        config.addAllowedMethod("*");
-        config.addAllowedHeader("*");
-        return new CorsFilter(new UrlBasedCorsConfigurationSource());
-    }
-}
-```
-
-## 📊 Performance Considerations
-
-### 1. **Connection Scaling**
-- **In-memory broker** suitable for single instance
-- **Redis/RabbitMQ** for multi-instance deployment
-- **Connection pooling** for high concurrency
-
-### 2. **Message Optimization**
-- **JSON serialization** for message format
-- **Message compression** for large payloads
-- **Batch processing** for multiple messages
-
-### 3. **Resource Management**
-- **Connection cleanup** on user logout
-- **Memory management** for message history
-- **Database optimization** for message storage
-
-## 🚀 Production Considerations
-
-### 1. **Scalability**
-- **Load balancer** with sticky sessions
-- **External message broker** (Redis/RabbitMQ)
-- **Database clustering** for message persistence
-
-### 2. **Security**
-- **Authentication** integration
-- **Authorization** for message access
-- **Rate limiting** for message sending
-
-### 3. **Monitoring**
-- **Connection metrics** tracking
-- **Message delivery** monitoring
-- **Error logging** and alerting
-
-## 📋 Prerequisites
-
-- Java 17 or higher
-- Maven (or use Maven Wrapper included)
-- Web browser with JavaScript enabled
+- **Containerization**: Docker
 
 ## 🚀 Quick Start
 
-### 1. Clone the Repository
-```bash
-git clone <repository-url>
-cd whatsapp-chat-clone
-```
+### Prerequisites
+- Java 21 or higher
+- Maven (or use Maven Wrapper included)
 
-### 2. Run the Application
+### Run the Application
 
 **Option A: Using Maven Wrapper (Recommended)**
 ```bash
@@ -310,30 +48,9 @@ docker run -p 8080:8080 whatsapp-chat-clone
 docker-compose up --build
 ```
 
-**Option C: Using Maven (if installed)**
-```bash
-mvn spring-boot:run
-```
-
-### 3. Access the Application
+### Access the Application
 - Open your browser and go to: `http://localhost:8080`
 - The application will start on port 8080
-
-## ☁️ Deploy to Render
-
-### Quick Deploy
-1. **Fork this repository** to your GitHub account
-2. **Connect to Render** at [render.com](https://render.com)
-3. **Create new Web Service** from your repository
-4. **Use the included `render.yaml`** for automatic configuration
-5. **Deploy** and access your live chat application!
-
-### Detailed Deployment Guide
-See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive deployment instructions including:
-- Docker containerization
-- Render deployment steps
-- Environment configuration
-- Monitoring and troubleshooting
 
 ## 🎯 How to Use
 
@@ -353,6 +70,62 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive deployment instructions inc
 - Send messages between users
 - Observe real-time message delivery
 
+## 🏗️ Architecture
+
+### WebSocket Communication
+- **Protocol**: STOMP over WebSocket with SockJS fallback
+- **Message Broker**: Spring's in-memory broker
+- **Security**: Session-based user routing
+- **Topics**: Session-specific topics for private messaging
+
+### Message Flow
+1. **Client connects** via WebSocket to `/ws`
+2. **User joins** and gets session-specific topics
+3. **Messages sent** to `/app/chat.sendMessage`
+4. **Server routes** to receiver's session topic
+5. **Real-time delivery** to specific user
+
+### Key Components
+- **WebSocketConfig**: WebSocket and STOMP configuration
+- **ChatController**: WebSocket message handling
+- **WebSocketSessionManager**: Session management and routing
+- **UserController**: REST API for user operations
+- **MessageController**: Message history API
+
+## 📡 API Endpoints
+
+### REST Endpoints
+- `POST /api/users/login` - User login
+- `GET /api/users/online` - Get online users
+- `GET /api/users/session/{username}` - Get user session ID
+- `GET /api/messages/conversation/{user1}/{user2}` - Get conversation history
+
+### WebSocket Endpoints
+- `/ws` - WebSocket connection endpoint
+- `/app/chat.sendMessage` - Send chat message
+- `/app/chat.addUser` - User joins chat
+- `/app/chat.leave` - User leaves chat
+
+## 🔧 Configuration
+
+### Database
+- **Type**: H2 in-memory database
+- **Console**: Available at `http://localhost:8080/h2-console`
+- **Auto-creation**: Tables created automatically on startup
+
+### WebSocket
+- **Endpoint**: `/ws`
+- **Message Broker**: `/topic/*` and `/queue/*`
+- **Application Prefix**: `/app/*`
+
+## ☁️ Deploy to Render
+
+1. **Fork this repository** to your GitHub account
+2. **Connect to Render** at [render.com](https://render.com)
+3. **Create new Web Service** from your repository
+4. **Use the included Dockerfile** for automatic configuration
+5. **Deploy** and access your live chat application!
+
 ## 🏗️ Project Structure
 
 ```
@@ -369,56 +142,17 @@ src/
 │   │   │   └── MessageController.java        # Message REST endpoints
 │   │   ├── model/
 │   │   │   ├── User.java                     # User entity
-│   │   │   └── Message.java                   # Message entity
+│   │   │   └── Message.java                  # Message entity
 │   │   ├── repository/
-│   │   │   ├── UserRepository.java            # User data access
+│   │   │   ├── UserRepository.java           # User data access
 │   │   │   └── MessageRepository.java        # Message data access
 │   │   └── dto/
-│   │       └── ChatMessage.java               # Message DTO
+│   │       └── ChatMessage.java              # Message DTO
 │   └── resources/
 │       ├── static/
-│       │   └── index.html                     # Frontend UI
+│       │   └── index.html                    # Frontend UI
 │       └── application.properties            # Application configuration
-└── test/
-    └── java/com/example/whatsapp_chat_clone/
-        └── WhatsappChatCloneApplicationTests.java
 ```
-
-## 🔧 Configuration
-
-### Database Configuration
-The application uses H2 in-memory database with the following settings:
-- **URL**: `jdbc:h2:mem:testdb`
-- **Username**: `sa`
-- **Password**: `password`
-- **Console**: Available at `http://localhost:8080/h2-console`
-
-### WebSocket Configuration
-- **Endpoint**: `/ws`
-- **Topics**: `/topic/chat`, `/topic/public`
-- **Message Mappings**: `/app/chat.*`
-
-## 📡 API Endpoints
-
-### REST Endpoints
-- `POST /api/users/login` - User login
-- `GET /api/users/online` - Get online users
-- `GET /api/messages/conversation/{user1}/{user2}` - Get conversation history
-
-### WebSocket Endpoints
-- `/ws` - WebSocket connection endpoint
-- `/app/chat.sendMessage` - Send chat message
-- `/app/chat.addUser` - User joins chat
-- `/app/chat.leave` - User leaves chat
-
-## 🎨 Frontend Features
-
-- **Responsive Design**: Works on desktop and mobile
-- **Real-time Updates**: Messages appear instantly
-- **Auto-scroll**: Chat automatically scrolls to latest messages
-- **User Status**: Shows online/offline status
-- **Message Timestamps**: Displays when messages were sent
-- **Auto-switch**: Automatically switches to sender's conversation
 
 ## 📝 Demo Users
 
@@ -427,18 +161,17 @@ The application comes with pre-configured demo users:
 - **bob** - Default user 2  
 - **charlie** - Default user 3
 
+## 🆘 Troubleshooting
 
-## 📄 License
+### Common Issues
+1. **Port 8080 already in use**: Change port in `application.properties`
+2. **WebSocket connection failed**: Check browser console for errors
+3. **Messages not appearing**: Verify WebSocket connection and subscriptions
 
-This project is for educational and demonstration purposes.
-
-## 🆘 Support
-
-If you encounter any issues:
-1. Check the troubleshooting section
-2. Review browser console for errors
-3. Ensure all prerequisites are installed
-4. Try restarting the application
+### Debug Mode
+- Check browser console for WebSocket connection status
+- Monitor server logs for message routing
+- Use `/api/users/debug/sessions` to see active sessions
 
 ---
 

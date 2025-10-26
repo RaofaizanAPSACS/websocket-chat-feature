@@ -10,7 +10,7 @@ public class ChatMessage {
     private MessageType type;
     
     public enum MessageType {
-        CHAT, JOIN, LEAVE, TYPING, STOP_TYPING
+        CHAT, JOIN, LEAVE, TYPING, STOP_TYPING, DELIVERED
     }
     
     // Constructors
