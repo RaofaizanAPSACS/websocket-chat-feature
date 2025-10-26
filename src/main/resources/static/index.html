@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Chat Clone - WebSocket Demo</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #075e54;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .login-section {
+            padding: 40px;
+            text-align: center;
+        }
+        .login-section input {
+            padding: 10px;
+            margin: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 200px;
+        }
+        .login-section button {
+            padding: 10px 20px;
+            background: #075e54;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .chat-container {
+            display: none;
+            height: 600px;
+        }
+        .chat-container.show {
+            display: flex;
+            flex-direction: row;
+        }
+        .sidebar {
+            width: 30%;
+            min-width: 250px;
+            background: #f8f9fa;
+            border-right: 1px solid #ddd;
+            height: 100%;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .chat-area {
+            flex: 1;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            min-width: 0; /* Prevents flex item from overflowing */
+        }
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #e5ddd5;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 10px;
+            max-width: 70%;
+        }
+        .message.sent {
+            background: #dcf8c6;
+            margin-left: auto;
+        }
+        .message.received {
+            background: white;
+        }
+        .message-input {
+            padding: 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+        }
+        .message-input input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            margin-right: 10px;
+        }
+        .message-input button {
+            padding: 10px 20px;
+            background: #075e54;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+        }
+        .user-list {
+            padding: 10px;
+        }
+        .user-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .user-item:hover {
+            background: #e9ecef;
+        }
+        .user-item.online {
+            color: #25d366;
+        }
+        .user-item.selected {
+            background: #dcf8c6;
+            border-left: 3px solid #25d366;
+        }
+        .chat-header {
+            padding: 15px 20px;
+            background: #f0f0f0;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+        }
+        .chat-header h3 {
+            margin: 0;
+            color: #333;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>WhatsApp Chat Clone - WebSocket Demo</h1>
+            <p>Real-time messaging with Spring Boot WebSockets</p>
+        </div>
+        
+        <div id="loginSection" class="login-section">
+            <h2>Login to Chat</h2>
+            <input type="text" id="usernameInput" placeholder="Enter your username" />
+            <br>
+            <button onclick="login()">Login</button>
+        </div>
+        
+        <div id="chatContainer" class="chat-container">
+            <div class="sidebar">
+                <div class="status">
+                    <span id="currentUser"></span> is online
+                </div>
+                <div class="user-list">
+                    <h3>Online Users</h3>
+                    <div id="userList"></div>
+                </div>
+            </div>
+            <div class="chat-area">
+                <div class="chat-header" id="chatHeader">
+                    <h3>Select a user to start chatting</h3>
+                </div>
+                <div class="messages" id="messages"></div>
+                <div class="message-input" id="messageInputContainer" style="display: none;">
+                    <input type="text" id="messageInput" placeholder="Type a message..." />
+                    <button onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let stompClient = null;
+        let currentUsername = null;
+        let currentUser = null;
+        let selectedUser = null;
+
+        function login() {
+            const username = document.getElementById('usernameInput').value.trim();
+            if (!username) {
+                alert('Please enter a username');
+                return;
+            }
+
+            fetch('/api/users/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username: username })
+            })
+            .then(response => response.json())
+            .then(data => {
+                currentUser = data;
+                currentUsername = username;
+                document.getElementById('currentUser').textContent = username;
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('chatContainer').classList.add('show');
+                connect();
+                loadOnlineUsers();
+            })
+            .catch(error => {
+                console.error('Login error:', error);
+                alert('Login failed');
+            });
+        }
+
+        function connect() {
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, function (frame) {
+                console.log('Connected: ' + frame);
+                
+                // Subscribe to chat messages - filter by receiver
+                stompClient.subscribe('/topic/chat', function (message) {
+                    const chatMessage = JSON.parse(message.body);
+                    
+                    // Only process messages where current user is the receiver
+                    if (chatMessage.receiver === currentUsername) {
+                        // Auto-switch to sender's conversation if not already there
+                        if (selectedUser !== chatMessage.sender) {
+                            selectedUser = chatMessage.sender;
+                            
+                            // Update UI
+                            document.getElementById('chatHeader').innerHTML = `<h3>Chat with ${chatMessage.sender}</h3>`;
+                            document.getElementById('messageInputContainer').style.display = 'flex';
+                            
+                            // Update sidebar
+                            document.querySelectorAll('.user-item').forEach(item => {
+                                item.classList.remove('selected');
+                                if (item.textContent === chatMessage.sender) {
+                                    item.classList.add('selected');
+                                }
+                            });
+                            
+                            // Load conversation history
+                            document.getElementById('messages').innerHTML = '';
+                            loadConversationHistory(chatMessage.sender);
+                        }
+                        
+                        // Display the message
+                        setTimeout(() => {
+                            displayMessage(chatMessage);
+                        }, 100);
+                    }
+                });
+
+                // Subscribe to public messages (for user join/leave)
+                stompClient.subscribe('/topic/public', function (message) {
+                    const chatMessage = JSON.parse(message.body);
+                    if (chatMessage.type === 'JOIN' || chatMessage.type === 'LEAVE') {
+                        loadOnlineUsers();
+                    }
+                });
+
+                // Subscribe to typing indicators
+                stompClient.subscribe('/user/queue/typing', function (message) {
+                    const chatMessage = JSON.parse(message.body);
+                    // Handle typing indicators here
+                });
+
+                // Send join message
+                stompClient.send("/app/chat.addUser", {}, JSON.stringify({
+                    sender: currentUsername,
+                    type: 'JOIN'
+                }));
+            });
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+            if (content && stompClient && selectedUser) {
+                const chatMessage = {
+                    content: content,
+                    sender: currentUsername,
+                    receiver: selectedUser,
+                    type: 'CHAT'
+                };
+                
+                
+                // Display the message immediately for better UX
+                displayMessage(chatMessage);
+                
+                // Send via WebSocket
+                stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+                messageInput.value = '';
+            }
+        }
+
+        function displayMessage(message) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = message.sender === currentUsername ? 'message sent' : 'message received';
+            
+            // Format timestamp properly
+            let timeString = '';
+            if (message.timestamp) {
+                try {
+                    const date = typeof message.timestamp === 'string' ? new Date(message.timestamp) : message.timestamp;
+                    timeString = date.toLocaleTimeString();
+                } catch (e) {
+                    timeString = new Date().toLocaleTimeString();
+                }
+            } else {
+                timeString = new Date().toLocaleTimeString();
+            }
+            
+            messageDiv.innerHTML = `
+                <strong>${message.sender}:</strong> ${message.content}
+                <br><small>${timeString}</small>
+            `;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function loadOnlineUsers() {
+            fetch('/api/users/online')
+                .then(response => response.json())
+                .then(users => {
+                    const userListDiv = document.getElementById('userList');
+                    userListDiv.innerHTML = '';
+                    users.forEach(user => {
+                        if (user.username !== currentUsername) { // Don't show current user in list
+                            const userDiv = document.createElement('div');
+                            userDiv.className = 'user-item online';
+                            userDiv.textContent = user.username;
+                            userDiv.onclick = (event) => selectUser(user.username, event);
+                            userListDiv.appendChild(userDiv);
+                        }
+                    });
+                })
+                .catch(error => console.error('Error loading users:', error));
+        }
+
+        function selectUser(username, event) {
+            selectedUser = username;
+            
+            // Update UI
+            document.querySelectorAll('.user-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            if (event && event.target) {
+                event.target.classList.add('selected');
+            }
+            
+            // Update chat header
+            document.getElementById('chatHeader').innerHTML = `<h3>Chat with ${username}</h3>`;
+            
+            // Show message input
+            document.getElementById('messageInputContainer').style.display = 'flex';
+            
+            // Clear messages and load conversation history
+            document.getElementById('messages').innerHTML = '';
+            loadConversationHistory(username);
+            
+        }
+
+        function loadConversationHistory(username) {
+            fetch(`/api/messages/conversation/${currentUsername}/${username}`)
+                .then(response => response.json())
+                .then(messages => {
+                    messages.forEach(message => {
+                        // Convert database message to chat message format
+                        const chatMessage = {
+                            content: message.content,
+                            sender: message.sender.username,
+                            receiver: message.receiver.username,
+                            timestamp: message.sentAt,
+                            type: 'CHAT'
+                        };
+                        displayMessage(chatMessage);
+                    });
+                })
+                .catch(error => console.error('Error loading conversation:', error));
+        }
+
+        // Handle Enter key in message input
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+
+        // Handle page unload
+        window.addEventListener('beforeunload', function() {
+            if (stompClient && currentUsername) {
+                stompClient.send("/app/chat.leave", {}, JSON.stringify({
+                    sender: currentUsername,
+                    type: 'LEAVE'
+                }));
+            }
+        });
+
+    </script>
+</body>
+</html>
